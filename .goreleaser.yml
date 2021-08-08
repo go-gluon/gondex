@@ -1,5 +1,5 @@
 builds:
-  skip: true
+  - skip: true
 snapshot:
   name_template: "{{ .Tag }}-next"
 changelog:
