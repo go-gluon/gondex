@@ -41,6 +41,11 @@ type StructInfo struct {
 	annotations []*AnnotationInfo
 }
 
+// Decl ast declaration of the type
+func (s *StructInfo) Decl() *AstTypeDecl {
+	return s.decl
+}
+
 // Package struct package info
 func (s *StructInfo) Package() *PackageInfo {
 	return s.pkg
@@ -80,6 +85,11 @@ type FunctionInfo struct {
 	annotations []*AnnotationInfo
 }
 
+// Decl ast declaration of the type
+func (s *FunctionInfo) Decl() *AstFuncDecl {
+	return s.decl
+}
+
 // InterfaceInfo represents interface
 type InterfaceInfo struct {
 	pkg         *PackageInfo
@@ -87,6 +97,11 @@ type InterfaceInfo struct {
 	data        *types.Interface
 	decl        *AstTypeDecl
 	annotations []*AnnotationInfo
+}
+
+// Decl ast declaration of the type
+func (s *InterfaceInfo) Decl() *AstTypeDecl {
+	return s.decl
 }
 
 // Id of the interface
@@ -404,6 +419,16 @@ func (a *AstTypeDecl) Annotations() []*AnnotationInfo {
 	return createAnnotations(a.decl.Doc)
 }
 
+// StructType struct type of the type
+func (a *AstTypeDecl) StructType() *ast.StructType {
+	return a.ast.Type.(*ast.StructType)
+}
+
+// InterfaceType struct type of the type
+func (a *AstTypeDecl) InterfaceType() *ast.InterfaceType {
+	return a.ast.Type.(*ast.InterfaceType)
+}
+
 // AstFuncDecl ast function declaration
 type AstFuncDecl struct {
 	decl *ast.FuncDecl
@@ -412,6 +437,11 @@ type AstFuncDecl struct {
 // Annotations returns list of annotations
 func (a *AstFuncDecl) Annotations() []*AnnotationInfo {
 	return createAnnotations(a.decl.Doc)
+}
+
+// FuncType struct type of the type
+func (a *AstFuncDecl) FuncType() *ast.FuncType {
+	return a.decl.Type
 }
 
 // AstInfo syntax info
