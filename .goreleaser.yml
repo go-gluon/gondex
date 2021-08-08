@@ -1,7 +1,8 @@
+before:
+  hooks:
+    - go mod tidy
 builds:
-  - skip: true
-snapshot:
-  name_template: "{{ .Tag }}-next"
+- skip: true
 changelog:
   sort: asc
   filters:
