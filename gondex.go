@@ -37,7 +37,23 @@ type StructInfo struct {
 	pkg         *PackageInfo
 	named       *types.Named
 	data        *types.Struct
+	decl        *AstTypeDecl
 	annotations []*AnnotationInfo
+}
+
+// Package struct package info
+func (s *StructInfo) Package() *PackageInfo {
+	return s.pkg
+}
+
+// Named type named of struct
+func (s *StructInfo) Named() *types.Named {
+	return s.named
+}
+
+// Struct type of struct
+func (s *StructInfo) Struct() *types.Struct {
+	return s.data
 }
 
 // Annotations returns list of struct annotations of empty list
@@ -60,6 +76,7 @@ type FunctionInfo struct {
 	pkg         *PackageInfo
 	signature   *types.Signature
 	data        *types.Func
+	decl        *AstFuncDecl
 	annotations []*AnnotationInfo
 }
 
@@ -68,6 +85,7 @@ type InterfaceInfo struct {
 	pkg         *PackageInfo
 	named       *types.Named
 	data        *types.Interface
+	decl        *AstTypeDecl
 	annotations []*AnnotationInfo
 }
 
@@ -92,6 +110,11 @@ type PackageInfo struct {
 	structs    []*StructInfo
 	functions  []*FunctionInfo
 	interfaces []*InterfaceInfo
+}
+
+// Data of the package
+func (p *PackageInfo) Data() *packages.Package {
+	return p.data
 }
 
 // ID of the package
@@ -124,17 +147,24 @@ func (indexer *Indexer) createPackageInfo(pkg *packages.Package) *PackageInfo {
 }
 
 // createStructInfo creates struct info
-func (indexer *Indexer) createStructInfo(pkg *PackageInfo, named *types.Named, data *types.Struct, comment *ast.CommentGroup) *StructInfo {
+func (indexer *Indexer) createStructInfo(pkg *PackageInfo, ast *AstInfo, named *types.Named, data *types.Struct) *StructInfo {
+	name := named.Obj().Name()
+
 	s := &StructInfo{
 		pkg:         pkg,
 		named:       named,
 		data:        data,
+		decl:        ast.types[name],
 		annotations: []*AnnotationInfo{},
 	}
 	pkg.structs = append(pkg.structs, s)
 	indexer.cacheS[s.Id()] = s
 
-	anno := createAnnotations(comment)
+	if s.decl == nil {
+		return s
+	}
+
+	anno := s.decl.Annotations()
 	if anno != nil {
 		s.annotations = append(s.annotations, anno...)
 		for _, a := range anno {
@@ -151,16 +181,23 @@ func (indexer *Indexer) createStructInfo(pkg *PackageInfo, named *types.Named, d
 }
 
 // createInterfaceInfo creates interface info
-func (indexer *Indexer) createInterfaceInfo(pkg *PackageInfo, named *types.Named, data *types.Interface, comment *ast.CommentGroup) *InterfaceInfo {
+func (indexer *Indexer) createInterfaceInfo(pkg *PackageInfo, ast *AstInfo, named *types.Named, data *types.Interface) *InterfaceInfo {
+	name := named.Obj().Name()
+
 	s := &InterfaceInfo{
 		pkg:   pkg,
 		named: named,
 		data:  data,
+		decl:  ast.types[name],
 	}
 	pkg.interfaces = append(pkg.interfaces, s)
 	indexer.cacheI[s.Id()] = s
 
-	anno := createAnnotations(comment)
+	if s.decl == nil {
+		return s
+	}
+
+	anno := s.decl.Annotations()
 	if anno != nil {
 		s.annotations = append(s.annotations, anno...)
 		for _, a := range anno {
@@ -176,14 +213,21 @@ func (indexer *Indexer) createInterfaceInfo(pkg *PackageInfo, named *types.Named
 }
 
 // createFunctionInfo create function info
-func (indexer *Indexer) createFunctionInfo(pkg *PackageInfo, signature *types.Signature, data *types.Func, comment *ast.CommentGroup) *FunctionInfo {
+func (indexer *Indexer) createFunctionInfo(pkg *PackageInfo, ast *AstInfo, signature *types.Signature, data *types.Func) *FunctionInfo {
+	name := data.Name()
+
 	f := &FunctionInfo{
 		pkg:       pkg,
 		signature: signature,
 		data:      data,
+		decl:      ast.functions[name],
 	}
 	pkg.functions = append(pkg.functions, f)
-	anno := createAnnotations(comment)
+	if f.decl == nil {
+		return f
+	}
+
+	anno := f.decl.Annotations()
 	if anno != nil {
 		f.annotations = append(f.annotations, anno...)
 	}
@@ -192,7 +236,16 @@ func (indexer *Indexer) createFunctionInfo(pkg *PackageInfo, signature *types.Si
 
 // loadPackages load packages
 func (indexer *Indexer) loadPackages(pattern string) ([]*packages.Package, error) {
-	cfg := &packages.Config{Mode: packages.NeedSyntax | packages.NeedName | packages.NeedTypes | packages.NeedTypesSizes | packages.NeedTypesInfo}
+	cfg := &packages.Config{Mode: packages.NeedSyntax |
+		packages.NeedName |
+		packages.NeedTypes |
+		// packages.NeedTypesSizes |
+		packages.NeedTypesInfo |
+		// packages.NeedCompiledGoFiles |
+		// packages.NeedDeps |
+		// packages.NeedImports |
+		// packages.NeedExportsFile |
+		packages.NeedFiles}
 	pkgs, err := packages.Load(cfg, pattern)
 	if err != nil {
 		return nil, fmt.Errorf("loading packages for inspection: %v", err)
@@ -222,27 +275,25 @@ func (indexer *Indexer) LoadPattern(pattern string) error {
 		// create package info
 		pkgInfo := indexer.createPackageInfo(pkg)
 
-		// find all comments
-		comments := findTypeComments(pkg)
+		// find all typeSpec
+		astInfo := processAstInfo(pkg)
 
 		// loop over all types
 		for _, name := range pkg.Types.Scope().Names() {
 			obj := pkg.Types.Scope().Lookup(name)
 
-			comment := comments[obj.Name()]
-
 			switch objT := obj.Type().(type) {
 			case *types.Named:
 				switch undT := objT.Underlying().(type) {
 				case *types.Struct:
-					indexer.createStructInfo(pkgInfo, objT, undT, comment)
+					indexer.createStructInfo(pkgInfo, astInfo, objT, undT)
 				case *types.Interface:
-					indexer.createInterfaceInfo(pkgInfo, objT, undT, comment)
+					indexer.createInterfaceInfo(pkgInfo, astInfo, objT, undT)
 				default:
 					panic(fmt.Errorf("not supported named type %v - %T", undT, undT))
 				}
 			case *types.Signature:
-				indexer.createFunctionInfo(pkgInfo, objT, obj.(*types.Func), comment)
+				indexer.createFunctionInfo(pkgInfo, astInfo, objT, obj.(*types.Func))
 			default:
 				panic(fmt.Errorf("not supported object type %v - %T", objT, objT))
 			}
@@ -342,17 +393,52 @@ func createAnnotations(comment *ast.CommentGroup) []*AnnotationInfo {
 	return result
 }
 
-// findTypeComments find all comments in the package for the types
-func findTypeComments(pkg *packages.Package) map[string]*ast.CommentGroup {
-	result := map[string]*ast.CommentGroup{}
+// AstFuncDecl ast type declaration
+type AstTypeDecl struct {
+	decl *ast.GenDecl
+	ast  *ast.TypeSpec
+}
+
+// Annotations returns list of annotations
+func (a *AstTypeDecl) Annotations() []*AnnotationInfo {
+	return createAnnotations(a.decl.Doc)
+}
+
+// AstFuncDecl ast function declaration
+type AstFuncDecl struct {
+	decl *ast.FuncDecl
+}
+
+// Annotations returns list of annotations
+func (a *AstFuncDecl) Annotations() []*AnnotationInfo {
+	return createAnnotations(a.decl.Doc)
+}
+
+// AstInfo syntax info
+type AstInfo struct {
+	functions map[string]*AstFuncDecl
+	types     map[string]*AstTypeDecl
+}
+
+// processAstInfo find all types and functions in the AST
+func processAstInfo(pkg *packages.Package) *AstInfo {
+	result := &AstInfo{
+		functions: map[string]*AstFuncDecl{},
+		types:     map[string]*AstTypeDecl{},
+	}
 	for _, syntax := range pkg.Syntax {
 		for _, decl := range syntax.Decls {
-			if gd, ok := decl.(*ast.GenDecl); ok {
-				if gd.Doc != nil && len(gd.Doc.List) > 0 {
-					if ts, ok := gd.Specs[0].(*ast.TypeSpec); ok {
-						result[ts.Name.Name] = gd.Doc
+			switch dt := decl.(type) {
+			case *ast.GenDecl:
+				for _, spec := range dt.Specs {
+					if ts, ok := spec.(*ast.TypeSpec); ok {
+						result.types[ts.Name.Name] = &AstTypeDecl{decl: dt, ast: ts}
 					}
 				}
+			case *ast.FuncDecl:
+				result.functions[dt.Name.Name] = &AstFuncDecl{decl: dt}
+			default:
+				panic(fmt.Errorf("not supported decl type %v - %T", dt, dt))
 			}
 		}
 	}
