@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/types"
+	"reflect"
 	"strings"
 
 	"golang.org/x/tools/go/packages"
@@ -74,6 +75,18 @@ func (s *StructInfo) Name() string {
 // Id of the struct
 func (s *StructInfo) Id() string {
 	return id(s.pkg, s.named)
+}
+
+func (s *StructInfo) Fields(walk FieldStructWalk) {
+	f := &FieldStructInfo{
+		Info:     s,
+		Metadata: map[string]string{},
+		Parent:   nil,
+		Named:    s.named,
+		Struct:   s.data,
+		Level:    0,
+	}
+	walkStruct(f, walk)
 }
 
 // FunctionInfo represents function
@@ -253,7 +266,7 @@ func (indexer *Indexer) createFunctionInfo(pkg *PackageInfo, signature *types.Si
 }
 
 // loadPackages load packages
-func (indexer *Indexer) loadPackages(pattern string) ([]*packages.Package, error) {
+func (indexer *Indexer) loadPackages(pattern ...string) ([]*packages.Package, error) {
 	cfg := &packages.Config{Mode: packages.NeedSyntax |
 		packages.NeedName |
 		packages.NeedTypes |
@@ -264,7 +277,7 @@ func (indexer *Indexer) loadPackages(pattern string) ([]*packages.Package, error
 		// packages.NeedImports |
 		// packages.NeedExportsFile |
 		packages.NeedFiles}
-	pkgs, err := packages.Load(cfg, pattern)
+	pkgs, err := packages.Load(cfg, pattern...)
 	if err != nil {
 		return nil, fmt.Errorf("loading packages for inspection: %v", err)
 	}
@@ -280,9 +293,9 @@ func (indexer *Indexer) Load() error {
 }
 
 // LoadPattern load packages by the pattern to the indexer
-func (indexer *Indexer) LoadPattern(pattern string) error {
+func (indexer *Indexer) LoadPattern(pattern ...string) error {
 	// load packages
-	pkgs, err := indexer.loadPackages(pattern)
+	pkgs, err := indexer.loadPackages(pattern...)
 	if err != nil {
 		return err
 	}
@@ -478,4 +491,181 @@ func processAstInfo(pkg *packages.Package) *AstInfo {
 		}
 	}
 	return result
+}
+
+type FieldStructInfo struct {
+	Info     *StructInfo
+	Parent   *FieldInfo
+	Named    *types.Named
+	Struct   *types.Struct
+	Level    int
+	Metadata map[string]string
+}
+
+func (f *FieldStructInfo) Name() string {
+	if f.Named != nil {
+		return f.Named.Obj().Name()
+	}
+	return f.Parent.Var().Name()
+}
+
+func (f *FieldStructInfo) NumFields() int {
+	return f.Struct.NumFields()
+}
+
+func (f *FieldStructInfo) Var(index int) *types.Var {
+	return f.Struct.Field(index)
+}
+
+func (f *FieldStructInfo) Tag(index int) string {
+	return f.Struct.Tag(index)
+}
+
+func (f *FieldStructInfo) Field(index int) *FieldInfo {
+	return &FieldInfo{
+		Index:    index,
+		Struct:   f,
+		Metadata: map[string]string{},
+	}
+}
+
+type FieldInfo struct {
+	Struct   *FieldStructInfo
+	Index    int
+	Metadata map[string]string
+}
+
+func (f *FieldInfo) Var() *types.Var {
+	return f.Struct.Var(f.Index)
+}
+
+func (f *FieldInfo) Tag() string {
+	return f.Struct.Tag(f.Index)
+}
+
+func (f *FieldInfo) Type() types.Type {
+	return f.Var().Type()
+}
+
+func (f *FieldInfo) Name() string {
+	return f.Var().Name()
+}
+
+const tag_empty = ""
+
+func (f *FieldInfo) TagValue(name string) (string, bool) {
+	tag := f.Tag()
+	if len(tag) == 0 {
+		return tag_empty, false
+	}
+	st := reflect.StructTag(tag)
+	return st.Lookup(name)
+}
+
+func (f *FieldInfo) FieldStructInfo(named *types.Named, struc *types.Struct) *FieldStructInfo {
+	return &FieldStructInfo{
+		Parent:   f,
+		Metadata: map[string]string{},
+		Named:    named,
+		Struct:   struc,
+		Level:    f.Struct.Level + 1,
+	}
+}
+
+func walkStruct(struc *FieldStructInfo, walk FieldStructWalk) {
+
+	if !walk.StructBefore(struc) {
+		return
+	}
+
+	for i := 0; i < struc.NumFields(); i++ {
+		field := struc.Field(i)
+
+		walk.FieldBefore(field)
+
+		switch n := field.Type().(type) {
+		case *types.Basic:
+			walk.Basic(field, n)
+		case *types.Slice:
+			if walk.Slice(field, n) {
+				switch nn := n.Elem().(type) {
+				case *types.Struct:
+					walkStruct(field.FieldStructInfo(nil, nn), walk)
+				case *types.Named:
+					switch nnn := nn.Underlying().(type) {
+					case *types.Struct:
+						walkStruct(field.FieldStructInfo(nn, nnn), walk)
+					}
+				}
+			}
+		case *types.Array:
+			if walk.Array(field, n) {
+				switch nn := n.Elem().(type) {
+				case *types.Struct:
+					walkStruct(field.FieldStructInfo(nil, nn), walk)
+				case *types.Named:
+					switch nnn := nn.Underlying().(type) {
+					case *types.Struct:
+						walkStruct(field.FieldStructInfo(nn, nnn), walk)
+					}
+				}
+			}
+		case *types.Map:
+			k, v := walk.Map(field, n)
+			if k {
+				switch nn := n.Key().(type) {
+				case *types.Struct:
+					walkStruct(field.FieldStructInfo(nil, nn), walk)
+				case *types.Named:
+					switch nnn := nn.Underlying().(type) {
+					case *types.Struct:
+						walkStruct(field.FieldStructInfo(nn, nnn), walk)
+					}
+				}
+			}
+			if v {
+				switch nn := n.Elem().(type) {
+				case *types.Struct:
+					walkStruct(field.FieldStructInfo(nil, nn), walk)
+				case *types.Named:
+					switch nnn := nn.Underlying().(type) {
+					case *types.Struct:
+						walkStruct(field.FieldStructInfo(nn, nnn), walk)
+					}
+				}
+			}
+		case *types.Interface:
+			walk.Interface(field, nil, n)
+		case *types.Struct:
+			if walk.Struct(field, nil, n) {
+				walkStruct(field.FieldStructInfo(nil, n), walk)
+			}
+		case *types.Named:
+			switch nn := n.Underlying().(type) {
+			case *types.Struct:
+				if walk.Struct(field, n, nn) {
+					walkStruct(field.FieldStructInfo(n, nn), walk)
+				}
+			case *types.Interface:
+				walk.Interface(field, n, nn)
+			}
+		}
+
+		walk.FieldAfter(field)
+	}
+
+	walk.StructAfter(struc)
+}
+
+type FieldStructWalk interface {
+	FieldBefore(f *FieldInfo) bool
+	FieldAfter(f *FieldInfo)
+	Basic(f *FieldInfo, t *types.Basic)
+	Interface(f *FieldInfo, n *types.Named, t *types.Interface)
+	Array(f *FieldInfo, t *types.Array) bool
+	Slice(f *FieldInfo, t *types.Slice) bool
+	Map(f *FieldInfo, t *types.Map) (bool, bool)
+	Struct(f *FieldInfo, n *types.Named, t *types.Struct) bool
+	StructBefore(s *FieldStructInfo) bool
+	StructAfter(s *FieldStructInfo)
 }
