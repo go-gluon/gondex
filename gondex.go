@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/types"
 	"reflect"
+	"regexp"
 	"strings"
 
 	"golang.org/x/tools/go/packages"
@@ -26,6 +27,8 @@ import (
 // 	_, ok := standardPackages[pkg]
 // 	return ok
 // }
+
+var defaultAnnotationRegex = regexp.MustCompile(`^//([0-9A-Za-z_\.]+):([0-9A-Za-z_\.]+ )`)
 
 // AnnotationInfo represents annotation
 type AnnotationInfo struct {
@@ -151,8 +154,14 @@ func (p *PackageInfo) Id() string {
 	return p.data.ID
 }
 
+type IndexerConfig struct {
+	DefaultAnnoRegex *regexp.Regexp
+	DefaultPattern   string
+}
+
 // Indexer hold the information about the packages and types
 type Indexer struct {
+	config   *IndexerConfig
 	packages []*PackageInfo
 	cacheP   map[string]*PackageInfo
 	cacheI   map[string]*InterfaceInfo
@@ -197,7 +206,7 @@ func (indexer *Indexer) createStructInfo(pkg *PackageInfo, named *types.Named, d
 		return s
 	}
 
-	anno := s.ast.Annotations()
+	anno := s.ast.Annotations(indexer.config.DefaultAnnoRegex)
 	if anno != nil {
 		s.annotations = append(s.annotations, anno...)
 		for _, a := range anno {
@@ -230,7 +239,7 @@ func (indexer *Indexer) createInterfaceInfo(pkg *PackageInfo, named *types.Named
 		return s
 	}
 
-	anno := s.ast.Annotations()
+	anno := s.ast.Annotations(indexer.config.DefaultAnnoRegex)
 	if anno != nil {
 		s.annotations = append(s.annotations, anno...)
 		for _, a := range anno {
@@ -258,7 +267,7 @@ func (indexer *Indexer) createFunctionInfo(pkg *PackageInfo, signature *types.Si
 		return f
 	}
 
-	anno := f.decl.Annotations()
+	anno := f.decl.Annotations(indexer.config.DefaultAnnoRegex)
 	if anno != nil {
 		f.annotations = append(f.annotations, anno...)
 	}
@@ -289,7 +298,7 @@ func (indexer *Indexer) loadPackages(pattern ...string) ([]*packages.Package, er
 
 // Load load packages by default pattern ./...
 func (indexer *Indexer) Load() error {
-	return indexer.LoadPattern("./...")
+	return indexer.LoadPattern(indexer.config.DefaultPattern)
 }
 
 // LoadPattern load packages by the pattern to the indexer
@@ -373,8 +382,22 @@ func (indexer *Indexer) Structs() map[string]*StructInfo {
 }
 
 // CreateIndexer creates indexer
-func CreateIndexer() *Indexer {
+func CreateDefaultConfig() *IndexerConfig {
+	return &IndexerConfig{
+		DefaultPattern:   "./...",
+		DefaultAnnoRegex: defaultAnnotationRegex,
+	}
+}
+
+// CreateIndexer creates indexer
+func CreateDefaultIndexer() *Indexer {
+	return CreateIndexer(CreateDefaultConfig())
+}
+
+// CreateIndexer creates indexer
+func CreateIndexer(config *IndexerConfig) *Indexer {
 	return &Indexer{
+		config:   config,
 		packages: []*PackageInfo{},
 		cacheP:   map[string]*PackageInfo{},
 		cacheI:   map[string]*InterfaceInfo{},
@@ -391,7 +414,7 @@ func id(pkg *PackageInfo, named *types.Named) string {
 }
 
 // createAnnotations this method creates list of annotations info from the comments
-func createAnnotations(comment *ast.CommentGroup) []*AnnotationInfo {
+func createAnnotations(comment *ast.CommentGroup, r *regexp.Regexp) []*AnnotationInfo {
 	if comment == nil {
 		return nil
 	}
@@ -403,20 +426,26 @@ func createAnnotations(comment *ast.CommentGroup) []*AnnotationInfo {
 	result := []*AnnotationInfo{}
 
 	for _, c := range comment.List {
-		if strings.HasPrefix(c.Text, "// @") {
-			tmp := strings.Split(c.Text[4:], " ")
-			if len(tmp) > 0 {
-				anno := &AnnotationInfo{
-					Name:   tmp[0],
-					Params: map[string]string{},
-				}
-				for i := 1; i < len(tmp); i++ {
-					param := strings.Split(tmp[i], "=")
-					anno.Params[param[0]] = param[1]
-				}
-				result = append(result, anno)
+		sm := r.FindString(c.Text)
+		if len(sm) == 0 {
+			continue
+		}
+		an := sm
+		tmp := strings.Split(c.Text[len(an):], " ")
+		an = strings.TrimSuffix(strings.TrimPrefix(an, "//"), " ")
+
+		anno := &AnnotationInfo{
+			Name:   an,
+			Params: map[string]string{},
+		}
+
+		if len(tmp) > 0 {
+			for _, t := range tmp {
+				param := strings.Split(t, "=")
+				anno.Params[param[0]] = param[1]
 			}
 		}
+		result = append(result, anno)
 	}
 	return result
 }
@@ -428,8 +457,8 @@ type AstTypeDecl struct {
 }
 
 // Annotations returns list of annotations
-func (a *AstTypeDecl) Annotations() []*AnnotationInfo {
-	return createAnnotations(a.decl.Doc)
+func (a *AstTypeDecl) Annotations(r *regexp.Regexp) []*AnnotationInfo {
+	return createAnnotations(a.decl.Doc, r)
 }
 
 // GenDecl struct type of the type
@@ -453,8 +482,8 @@ type AstFuncDecl struct {
 }
 
 // Annotations returns list of annotations
-func (a *AstFuncDecl) Annotations() []*AnnotationInfo {
-	return createAnnotations(a.decl.Doc)
+func (a *AstFuncDecl) Annotations(r *regexp.Regexp) []*AnnotationInfo {
+	return createAnnotations(a.decl.Doc, r)
 }
 
 // FuncType struct type of the type

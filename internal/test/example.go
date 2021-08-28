@@ -24,7 +24,7 @@ type TestI interface {
 	test() string
 }
 
-// @test:test
+//test:test param=1 test=ok
 type UserTest struct {
 	Embedded `test:"e"`
 	T        TestI               `test:"i"`

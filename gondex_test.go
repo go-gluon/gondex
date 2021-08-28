@@ -7,8 +7,19 @@ import (
 	"testing"
 )
 
+func TestAnnotation(t *testing.T) {
+	indexer := CreateDefaultIndexer()
+	if e := indexer.LoadPattern("github.com/go-gluon/gondex/internal/test", "github.com/go-gluon/gondex/internal/test/project"); e != nil {
+		panic(e)
+	}
+	items := indexer.FindInterfaceByAnnotation("test:test")
+	if len(items) == 0 {
+		panic(fmt.Errorf("No items found"))
+	}
+}
+
 func TestFieldStructWalk(t *testing.T) {
-	indexer := CreateIndexer()
+	indexer := CreateDefaultIndexer()
 	if e := indexer.LoadPattern("github.com/go-gluon/gondex/internal/test", "github.com/go-gluon/gondex/internal/test/project"); e != nil {
 		panic(e)
 	}
@@ -16,6 +27,9 @@ func TestFieldStructWalk(t *testing.T) {
 	w := &ExampleFieldWalk{}
 
 	tmp := indexer.FindStructByAnnotation("test:test")
+	if len(tmp) == 0 {
+		panic(fmt.Errorf("No items found"))
+	}
 	for _, t := range tmp {
 		t.Fields(w)
 	}
