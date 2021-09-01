@@ -156,7 +156,7 @@ func (p *PackageInfo) Id() string {
 
 type IndexerConfig struct {
 	DefaultAnnoRegex *regexp.Regexp
-	DefaultPattern   string
+	DefaultPattern   []string
 }
 
 // Indexer hold the information about the packages and types
@@ -298,7 +298,7 @@ func (indexer *Indexer) loadPackages(pattern ...string) ([]*packages.Package, er
 
 // Load load packages by default pattern ./...
 func (indexer *Indexer) Load() error {
-	return indexer.LoadPattern(indexer.config.DefaultPattern)
+	return indexer.LoadPattern(indexer.config.DefaultPattern...)
 }
 
 // LoadPattern load packages by the pattern to the indexer
@@ -384,7 +384,7 @@ func (indexer *Indexer) Structs() map[string]*StructInfo {
 // CreateIndexer creates indexer
 func CreateDefaultConfig() *IndexerConfig {
 	return &IndexerConfig{
-		DefaultPattern:   "./...",
+		DefaultPattern:   []string{"./..."},
 		DefaultAnnoRegex: defaultAnnotationRegex,
 	}
 }
