@@ -28,7 +28,7 @@ import (
 // 	return ok
 // }
 
-var defaultAnnotationRegex = regexp.MustCompile(`^//([0-9A-Za-z_\.]+):([0-9A-Za-z_\.]+ )`)
+var defaultAnnotationRegex = regexp.MustCompile(`^//([0-9A-Za-z_\.]+):([0-9A-Za-z_\.]+)`)
 
 // AnnotationInfo represents annotation
 type AnnotationInfo struct {
@@ -431,7 +431,7 @@ func createAnnotations(comment *ast.CommentGroup, r *regexp.Regexp) []*Annotatio
 			continue
 		}
 		an := sm
-		tmp := strings.Split(c.Text[len(an):], " ")
+		tmp := strings.Split(c.Text[len(an)+1:], " ")
 		an = strings.TrimSuffix(strings.TrimPrefix(an, "//"), " ")
 
 		anno := &AnnotationInfo{
