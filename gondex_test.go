@@ -7,6 +7,22 @@ import (
 	"testing"
 )
 
+func TestTypes(t *testing.T) {
+	indexer := CreateDefaultIndexer()
+	indexer.config.Debug = true
+	if e := indexer.LoadPattern("github.com/go-gluon/gondex/internal/test/types"); e != nil {
+		panic(e)
+	}
+	s := indexer.Structs()
+	if len(s) != 1 {
+		panic(fmt.Errorf("No structs found"))
+	}
+	i := indexer.Interfaces()
+	if len(i) != 1 {
+		panic(fmt.Errorf("No interfaces found"))
+	}
+}
+
 func TestAnnotation(t *testing.T) {
 	indexer := CreateDefaultIndexer()
 	if e := indexer.LoadPattern("github.com/go-gluon/gondex/internal/test", "github.com/go-gluon/gondex/internal/test/project"); e != nil {

@@ -28,7 +28,9 @@ import (
 // 	return ok
 // }
 
-var defaultAnnotationRegex = regexp.MustCompile(`^//([0-9A-Za-z_\.]+):([0-9A-Za-z_\.]+)`)
+var (
+	defaultAnnotationRegex = regexp.MustCompile(`^//([0-9A-Za-z_\.]+):([0-9A-Za-z_\.]+)`)
+)
 
 // AnnotationInfo represents annotation
 type AnnotationInfo struct {
@@ -157,6 +159,7 @@ func (p *PackageInfo) Id() string {
 type IndexerConfig struct {
 	DefaultAnnoRegex *regexp.Regexp
 	DefaultPattern   []string
+	Debug            bool
 }
 
 // Indexer hold the information about the packages and types
@@ -327,12 +330,12 @@ func (indexer *Indexer) LoadPattern(pattern ...string) error {
 				case *types.Interface:
 					indexer.createInterfaceInfo(pkgInfo, objT, undT)
 				default:
-					panic(fmt.Errorf("not supported named type %v - %T", undT, undT))
+					indexer.debug("load pattern not supported named type %v - %T", undT, undT)
 				}
 			case *types.Signature:
 				indexer.createFunctionInfo(pkgInfo, objT, obj.(*types.Func))
 			default:
-				panic(fmt.Errorf("not supported object type %v - %T", objT, objT))
+				indexer.debug("load pattern not supported object type %v - %T", objT, objT)
 			}
 		}
 	}
@@ -384,6 +387,7 @@ func (indexer *Indexer) Structs() map[string]*StructInfo {
 // CreateIndexer creates indexer
 func CreateDefaultConfig() *IndexerConfig {
 	return &IndexerConfig{
+		Debug:            false,
 		DefaultPattern:   []string{"./..."},
 		DefaultAnnoRegex: defaultAnnotationRegex,
 	}
@@ -697,4 +701,11 @@ type FieldStructWalk interface {
 	Struct(f *FieldInfo, n *types.Named, t *types.Struct) bool
 	StructBefore(s *FieldStructInfo) bool
 	StructAfter(s *FieldStructInfo)
+}
+
+func (indexer *Indexer) debug(msg string, a ...interface{}) {
+	if !indexer.config.Debug {
+		return
+	}
+	fmt.Printf("[debug] "+msg, a...)
 }
