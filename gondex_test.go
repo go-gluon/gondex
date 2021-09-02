@@ -21,6 +21,11 @@ func TestTypes(t *testing.T) {
 	if len(i) != 1 {
 		panic(fmt.Errorf("No interfaces found"))
 	}
+
+	impl := indexer.FindInterfaceImplementation("github.com/go-gluon/gondex/internal/test/types.Interface")
+	if len(impl) != 1 {
+		panic(fmt.Errorf("No implementation found %v", impl))
+	}
 }
 
 func TestAnnotation(t *testing.T) {

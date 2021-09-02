@@ -9,7 +9,11 @@ func init() {
 }
 
 type Struct struct {
-	Name string
+	name string
+}
+
+func (s *Struct) Name() string {
+	return s.name
 }
 
 type Interface interface {
@@ -19,7 +23,7 @@ type Interface interface {
 func TestMethod() {
 	test := []Struct{}
 	for _, s := range test {
-		s.Name = "1"
+		s.name = "1"
 	}
 	fmt.Printf("%v\n", test)
 }

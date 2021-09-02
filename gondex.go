@@ -357,12 +357,15 @@ func (indexer *Indexer) FindInterfaceByAnnotation(name string) []*StructInfo {
 func (indexer *Indexer) FindInterfaceImplementation(name string) []*StructInfo {
 	interfaceInfo := indexer.cacheI[name]
 	if interfaceInfo == nil {
+		indexer.debug("Interface not found %v", name)
 		return nil
 	}
 
 	result := []*StructInfo{}
 	for _, s := range indexer.cacheS {
-		if types.AssertableTo(interfaceInfo.data, s.named.Obj().Type()) {
+		if types.Implements(types.NewPointer(s.named.Obj().Type()), interfaceInfo.data) {
+			result = append(result, s)
+		} else if types.Implements(s.named.Obj().Type(), interfaceInfo.data) {
 			result = append(result, s)
 		}
 	}
@@ -707,5 +710,5 @@ func (indexer *Indexer) debug(msg string, a ...interface{}) {
 	if !indexer.config.Debug {
 		return
 	}
-	fmt.Printf("[debug] "+msg, a...)
+	fmt.Printf("[debug] "+msg+"\n", a...)
 }
