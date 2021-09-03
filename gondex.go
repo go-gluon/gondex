@@ -444,10 +444,10 @@ func id(pkg *PackageInfo, named *types.Named) string {
 
 // createAnnotations this method creates list of annotations info from the comments
 func createAnnotations(comment *ast.CommentGroup, r *regexp.Regexp) []*AnnotationInfo {
+	// ignore annotation for empty comment
 	if comment == nil {
 		return nil
 	}
-
 	if len(comment.List) == 0 {
 		return nil
 	}
@@ -459,21 +459,26 @@ func createAnnotations(comment *ast.CommentGroup, r *regexp.Regexp) []*Annotatio
 		if len(sm) == 0 {
 			continue
 		}
-		an := sm
-		tmp := strings.Split(c.Text[len(an)+1:], " ")
-		an = strings.TrimSuffix(strings.TrimPrefix(an, "//"), " ")
 
+		// create annotation
 		anno := &AnnotationInfo{
-			Name:   an,
+			Name:   strings.TrimSuffix(strings.TrimPrefix(sm, "//"), " "),
 			Params: map[string]string{},
 		}
 
-		if len(tmp) > 0 {
-			for _, t := range tmp {
-				param := strings.Split(t, "=")
-				anno.Params[param[0]] = param[1]
+		// check annotation parameters only if found annotation does not equals the comment
+		if sm != c.Text {
+
+			// remove annotation and first space
+			tmp := strings.Split(strings.TrimPrefix(c.Text, sm+" "), " ")
+			if len(tmp) > 0 {
+				for _, t := range tmp {
+					param := strings.Split(t, "=")
+					anno.Params[param[0]] = param[1]
+				}
 			}
 		}
+
 		result = append(result, anno)
 	}
 	return result
