@@ -11,26 +11,25 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-// var standardPackages = make(map[string]struct{})
-
-// func init() {
-// 	pkgs, err := packages.Load(nil, "std", "golang.org/x/...")
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	for _, pkg := range pkgs {
-// 		standardPackages[pkg.PkgPath] = struct{}{}
-// 	}
-// }
-
-// func IsStandardPackage(pkg string) bool {
-// 	_, ok := standardPackages[pkg]
-// 	return ok
-// }
-
 var (
 	defaultAnnotationRegex = regexp.MustCompile(`^//([0-9A-Za-z_\.]+):([0-9A-Za-z_\.]+)`)
+	goPackages             = map[string]struct{}{}
 )
+
+func init() {
+	pkgs, err := packages.Load(nil, "std", "golang.org/x/...")
+	if err != nil {
+		panic(err)
+	}
+	for _, pkg := range pkgs {
+		goPackages[pkg.PkgPath] = struct{}{}
+	}
+}
+
+func IsGoPackage(pkgPath string) bool {
+	_, ok := goPackages[pkgPath]
+	return ok
+}
 
 // AnnotationInfo represents annotation
 type AnnotationInfo struct {
@@ -160,6 +159,7 @@ type IndexerConfig struct {
 	DefaultAnnoRegex *regexp.Regexp
 	DefaultPattern   []string
 	Debug            bool
+	SkipGoPackages   bool
 }
 
 // Indexer hold the information about the packages and types
@@ -186,7 +186,7 @@ func (indexer *Indexer) createPackageInfo(pkg *packages.Package) *PackageInfo {
 		interfaces: []*InterfaceInfo{},
 	}
 
-	indexer.cacheP[p.Id()] = p
+	indexer.cacheP[p.data.PkgPath] = p
 	indexer.packages = append(indexer.packages, p)
 	return p
 }
@@ -286,7 +286,7 @@ func (indexer *Indexer) loadPackages(pattern ...string) ([]*packages.Package, er
 		packages.NeedTypesInfo |
 		// packages.NeedCompiledGoFiles |
 		// packages.NeedDeps |
-		// packages.NeedImports |
+		packages.NeedImports |
 		// packages.NeedExportsFile |
 		packages.NeedFiles}
 	pkgs, err := packages.Load(cfg, pattern...)
@@ -314,33 +314,54 @@ func (indexer *Indexer) LoadPattern(pattern ...string) error {
 
 	// loop over all packages
 	for _, pkg := range pkgs {
-
-		// create package info
-		pkgInfo := indexer.createPackageInfo(pkg)
-
-		// loop over all types
-		for _, name := range pkg.Types.Scope().Names() {
-			obj := pkg.Types.Scope().Lookup(name)
-
-			switch objT := obj.Type().(type) {
-			case *types.Named:
-				switch undT := objT.Underlying().(type) {
-				case *types.Struct:
-					indexer.createStructInfo(pkgInfo, objT, undT)
-				case *types.Interface:
-					indexer.createInterfaceInfo(pkgInfo, objT, undT)
-				default:
-					indexer.debug("load pattern not supported named type %v - %T", undT, undT)
-				}
-			case *types.Signature:
-				indexer.createFunctionInfo(pkgInfo, objT, obj.(*types.Func))
-			default:
-				indexer.debug("load pattern not supported object type %v - %T", objT, objT)
-			}
-		}
+		indexer.processPackage(pkg)
 	}
 
 	return nil
+}
+
+func (indexer *Indexer) processPackage(pkg *packages.Package) {
+	// check golang package
+	if indexer.config.SkipGoPackages && IsGoPackage(pkg.PkgPath) {
+		indexer.debug("Skip go pkg: %v", pkg.PkgPath)
+		return
+	}
+	// check if package already process
+	if _, e := indexer.cacheP[pkg.PkgPath]; e {
+		indexer.debug("Skip read pkg: %v", pkg.PkgPath)
+		return
+	}
+
+	// create package info
+	pkgInfo := indexer.createPackageInfo(pkg)
+
+	// loop over all types
+	for _, name := range pkg.Types.Scope().Names() {
+		obj := pkg.Types.Scope().Lookup(name)
+
+		switch objT := obj.Type().(type) {
+		case *types.Named:
+			switch undT := objT.Underlying().(type) {
+			case *types.Struct:
+				indexer.createStructInfo(pkgInfo, objT, undT)
+			case *types.Interface:
+				indexer.createInterfaceInfo(pkgInfo, objT, undT)
+			default:
+				indexer.debug("load pattern not supported named type %v - %T", undT, undT)
+			}
+		case *types.Signature:
+			indexer.createFunctionInfo(pkgInfo, objT, obj.(*types.Func))
+		default:
+			indexer.debug("load pattern not supported object type %v - %T", objT, objT)
+		}
+	}
+
+	// check all imports
+	if len(pkg.Imports) > 0 {
+		for _, v := range pkg.Imports {
+			indexer.processPackage(v)
+		}
+	}
 }
 
 // FindStructByAnnotation find all structs by annotation
@@ -390,6 +411,7 @@ func (indexer *Indexer) Structs() map[string]*StructInfo {
 // CreateIndexer creates indexer
 func CreateDefaultConfig() *IndexerConfig {
 	return &IndexerConfig{
+		SkipGoPackages:   true,
 		Debug:            false,
 		DefaultPattern:   []string{"./..."},
 		DefaultAnnoRegex: defaultAnnotationRegex,
