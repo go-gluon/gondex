@@ -20,6 +20,14 @@ type Interface interface {
 	Name() string
 }
 
+type Struct2 struct {
+	name string
+}
+
+func (s *Struct2) Name2() string {
+	return s.name
+}
+
 func TestMethod() {
 	test := []Struct{}
 	for _, s := range test {

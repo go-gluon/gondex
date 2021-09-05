@@ -46,6 +46,20 @@ type StructInfo struct {
 	annotations []*AnnotationInfo
 }
 
+// Implements returns true if struct implments the interface
+func (s *StructInfo) Implements(interfaceInfo *InterfaceInfo) bool {
+	if interfaceInfo == nil {
+		return false
+	}
+	if types.Implements(types.NewPointer(s.named.Obj().Type()), interfaceInfo.data) {
+		return true
+	}
+	if types.Implements(s.named.Obj().Type(), interfaceInfo.data) {
+		return true
+	}
+	return false
+}
+
 // Ast ast declaration of the type
 func (s *StructInfo) Ast() *AstTypeDecl {
 	return s.ast
@@ -384,9 +398,7 @@ func (indexer *Indexer) FindInterfaceImplementation(name string) []*StructInfo {
 
 	result := []*StructInfo{}
 	for _, s := range indexer.cacheS {
-		if types.Implements(types.NewPointer(s.named.Obj().Type()), interfaceInfo.data) {
-			result = append(result, s)
-		} else if types.Implements(s.named.Obj().Type(), interfaceInfo.data) {
+		if s.Implements(interfaceInfo) {
 			result = append(result, s)
 		}
 	}
@@ -398,14 +410,29 @@ func (indexer *Indexer) Packages() map[string]*PackageInfo {
 	return indexer.cacheP
 }
 
+// Package returns package by package path or nil
+func (indexer *Indexer) Package(pkgPath string) *PackageInfo {
+	return indexer.cacheP[pkgPath]
+}
+
 // Interfaces return map of all interfaces
 func (indexer *Indexer) Interfaces() map[string]*InterfaceInfo {
 	return indexer.cacheI
 }
 
+// Interface returns by name or nil
+func (indexer *Indexer) Interface(name string) *InterfaceInfo {
+	return indexer.cacheI[name]
+}
+
 // Structs return map of all structs
 func (indexer *Indexer) Structs() map[string]*StructInfo {
 	return indexer.cacheS
+}
+
+// Struct returns struct by name or nil
+func (indexer *Indexer) Struct(name string) *StructInfo {
+	return indexer.cacheS[name]
 }
 
 // CreateIndexer creates indexer

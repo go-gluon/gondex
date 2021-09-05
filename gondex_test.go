@@ -14,17 +14,41 @@ func TestTypes(t *testing.T) {
 		panic(e)
 	}
 	s := indexer.Structs()
-	if len(s) != 1 {
+	if len(s) == 0 {
 		panic(fmt.Errorf("No structs found"))
 	}
 	i := indexer.Interfaces()
-	if len(i) != 1 {
+	if len(i) == 0 {
 		panic(fmt.Errorf("No interfaces found"))
 	}
 
-	impl := indexer.FindInterfaceImplementation("github.com/go-gluon/gondex/internal/test/types.Interface")
+	st_name := "github.com/go-gluon/gondex/internal/test/types.Struct"
+	in_name := "github.com/go-gluon/gondex/internal/test/types.Interface"
+
+	impl := indexer.FindInterfaceImplementation(in_name)
 	if len(impl) != 1 {
 		panic(fmt.Errorf("No implementation found %v", impl))
+	}
+
+	st := indexer.Struct(st_name)
+	if st == nil {
+		panic(fmt.Errorf("defined struct not found! %v", st_name))
+	}
+	in := indexer.Interface(in_name)
+	if in == nil {
+		panic(fmt.Errorf("defined interface not found! %v", in_name))
+	}
+	if !st.Implements(in) {
+		panic(fmt.Errorf("struct %v does not implementns defined interface %v!", st_name, in_name))
+	}
+
+	st_name = st_name + "2"
+	st = indexer.Struct(st_name)
+	if st == nil {
+		panic(fmt.Errorf("defined struct not found! %v", st_name))
+	}
+	if st.Implements(in) {
+		panic(fmt.Errorf("struct %v does not implementns defined interface %v!", st_name, in_name))
 	}
 }
 
