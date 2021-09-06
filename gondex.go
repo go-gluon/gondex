@@ -130,7 +130,12 @@ type InterfaceInfo struct {
 	annotations []*AnnotationInfo
 }
 
-// Ast ast declaration of the type
+// Interface interface type
+func (s *InterfaceInfo) Interface() *types.Interface {
+	return s.data
+}
+
+// Ast declaration of the type
 func (s *InterfaceInfo) Ast() *AstTypeDecl {
 	return s.ast
 }
