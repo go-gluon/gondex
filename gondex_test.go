@@ -25,7 +25,7 @@ func TestTypes(t *testing.T) {
 	st_name := "github.com/go-gluon/gondex/internal/test/types.Struct"
 	in_name := "github.com/go-gluon/gondex/internal/test/types.Interface"
 
-	impl := indexer.FindInterfaceImplementation(in_name)
+	impl := indexer.FindInterfaceImplementations(in_name)
 	if len(impl) != 1 {
 		panic(fmt.Errorf("No implementation found %v", impl))
 	}
@@ -57,7 +57,7 @@ func TestAnnotation(t *testing.T) {
 	if e := indexer.LoadPattern("github.com/go-gluon/gondex/internal/test", "github.com/go-gluon/gondex/internal/test/project"); e != nil {
 		panic(e)
 	}
-	items := indexer.FindInterfaceByAnnotation("test:test")
+	items := indexer.FindInterfacesByAnnotation("test:test")
 	if len(items) == 0 {
 		panic(fmt.Errorf("No items found"))
 	}
@@ -71,7 +71,7 @@ func TestFieldStructWalk(t *testing.T) {
 
 	w := &ExampleFieldWalk{}
 
-	tmp := indexer.FindStructByAnnotation("test:test")
+	tmp := indexer.FindStructsByAnnotation("test:test")
 	if len(tmp) == 0 {
 		panic(fmt.Errorf("No items found"))
 	}

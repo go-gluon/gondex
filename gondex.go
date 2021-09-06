@@ -378,18 +378,18 @@ func (indexer *Indexer) processPackage(pkg *packages.Package) {
 	}
 }
 
-// FindStructByAnnotation find all structs by annotation
-func (indexer *Indexer) FindStructByAnnotation(name string) []*StructInfo {
+// FindStructsByAnnotation find all structs by annotation
+func (indexer *Indexer) FindStructsByAnnotation(name string) []*StructInfo {
 	return indexer.cacheA[name]
 }
 
-// FindInterfaceByAnnotation find all interfaces by annotation
-func (indexer *Indexer) FindInterfaceByAnnotation(name string) []*StructInfo {
+// FindInterfacesByAnnotation find all interfaces by annotation
+func (indexer *Indexer) FindInterfacesByAnnotation(name string) []*StructInfo {
 	return indexer.cacheA[name]
 }
 
 // FindInterfaceImplementation find all interface implementations
-func (indexer *Indexer) FindInterfaceImplementation(name string) []*StructInfo {
+func (indexer *Indexer) FindInterfaceImplementations(name string) []*StructInfo {
 	interfaceInfo := indexer.cacheI[name]
 	if interfaceInfo == nil {
 		indexer.debug("Interface not found %v", name)
