@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/types"
+	"path"
 	"reflect"
 	"regexp"
 	"strings"
@@ -43,7 +44,7 @@ type StructInfo struct {
 	named       *types.Named
 	data        *types.Struct
 	ast         *AstTypeDecl
-	annotations []*AnnotationInfo
+	annotations map[string]*AnnotationInfo
 }
 
 // Implements returns true if struct implments the interface
@@ -80,14 +81,30 @@ func (s *StructInfo) Struct() *types.Struct {
 	return s.data
 }
 
-// Annotations returns list of struct annotations of empty list
-func (s *StructInfo) Annotations() []*AnnotationInfo {
+// Annotations returns list of struct annotations or empty list
+func (s *StructInfo) Annotations() map[string]*AnnotationInfo {
 	return s.annotations
+}
+
+// Annotation returns annotation by name or nil
+func (s *StructInfo) Annotation(name string) *AnnotationInfo {
+	return s.annotations[name]
 }
 
 // Name this is the name of the struct
 func (s *StructInfo) Name() string {
 	return s.named.Obj().Name()
+}
+
+func (s *StructInfo) FieldStructInfo() *FieldStructInfo {
+	return &FieldStructInfo{
+		Info:     s,
+		Metadata: map[string]string{},
+		Parent:   nil,
+		Named:    s.named,
+		Struct:   s.data,
+		Level:    0,
+	}
 }
 
 // Id of the struct
@@ -96,14 +113,7 @@ func (s *StructInfo) Id() string {
 }
 
 func (s *StructInfo) Fields(walk FieldStructWalk) {
-	f := &FieldStructInfo{
-		Info:     s,
-		Metadata: map[string]string{},
-		Parent:   nil,
-		Named:    s.named,
-		Struct:   s.data,
-		Level:    0,
-	}
+	f := s.FieldStructInfo()
 	walkStruct(f, walk)
 }
 
@@ -113,12 +123,42 @@ type FunctionInfo struct {
 	signature   *types.Signature
 	data        *types.Func
 	decl        *AstFuncDecl
-	annotations []*AnnotationInfo
+	annotations map[string]*AnnotationInfo
 }
 
 // Decl ast declaration of the type
 func (s *FunctionInfo) Decl() *AstFuncDecl {
 	return s.decl
+}
+
+// Annotation returns annotation by name or nil
+func (s *FunctionInfo) Annotation(name string) *AnnotationInfo {
+	return s.annotations[name]
+}
+
+// Annotations returns list of interface annotations or emtpy list
+func (s *FunctionInfo) Annotations() map[string]*AnnotationInfo {
+	return s.annotations
+}
+
+// Func func type
+func (s *FunctionInfo) Func() *types.Func {
+	return s.data
+}
+
+// Ast declaration of the type
+func (s *FunctionInfo) Ast() *AstFuncDecl {
+	return s.decl
+}
+
+// Id of the interface
+func (s *FunctionInfo) Id() string {
+	return s.data.Id()
+}
+
+// Name of the interface
+func (s *FunctionInfo) Name() string {
+	return s.data.Name()
 }
 
 // InterfaceInfo represents interface
@@ -127,7 +167,12 @@ type InterfaceInfo struct {
 	named       *types.Named
 	data        *types.Interface
 	ast         *AstTypeDecl
-	annotations []*AnnotationInfo
+	annotations map[string]*AnnotationInfo
+}
+
+// Annotation returns annotation by name or nil
+func (s *InterfaceInfo) Annotation(name string) *AnnotationInfo {
+	return s.annotations[name]
 }
 
 // Interface interface type
@@ -151,8 +196,25 @@ func (s *InterfaceInfo) Name() string {
 }
 
 // Annotations returns list of interface annotations or emtpy list
-func (s *InterfaceInfo) Annotations() []*AnnotationInfo {
+func (s *InterfaceInfo) Annotations() map[string]*AnnotationInfo {
 	return s.annotations
+}
+
+// ModuleInfo struct represents the module information
+type ModuleInfo struct {
+	data *packages.Module
+}
+
+func (m *ModuleInfo) Name() string {
+	return path.Base(m.data.Path)
+}
+
+func (m *ModuleInfo) Version() string {
+	return path.Base(m.data.Version)
+}
+
+func (m *ModuleInfo) Data() *packages.Module {
+	return m.data
 }
 
 // PackageInfo struct represents the package information
@@ -179,23 +241,50 @@ type IndexerConfig struct {
 	DefaultPattern   []string
 	Debug            bool
 	SkipGoPackages   bool
+	Mode             packages.LoadMode
 }
 
 // Indexer hold the information about the packages and types
 type Indexer struct {
-	config   *IndexerConfig
-	packages []*PackageInfo
-	cacheP   map[string]*PackageInfo
-	cacheI   map[string]*InterfaceInfo
-	cacheS   map[string]*StructInfo
-	cacheA   map[string][]*StructInfo
-	cacheAI  map[string][]*InterfaceInfo
+	mode       packages.LoadMode
+	mainModule *ModuleInfo
+	config     *IndexerConfig
+	packages   []*PackageInfo
+	cacheP     map[string]*PackageInfo
+	cacheI     map[string]*InterfaceInfo
+	cacheS     map[string]*StructInfo
+	cacheA     map[string][]*StructInfo
+	cacheAI    map[string][]*InterfaceInfo
+	cacheM     map[string]*ModuleInfo
+}
+
+// create module info from the package
+func (indexer *Indexer) createModuleInfo(pkg *packages.Package) (*ModuleInfo, bool) {
+
+	if indexer.mode&packages.NeedTypes == 0 {
+		return nil, false
+	}
+
+	m, e := indexer.cacheM[pkg.Module.Path]
+	if e {
+		return m, false
+	}
+
+	module := &ModuleInfo{data: pkg.Module}
+	indexer.cacheM[pkg.Module.Path] = module
+
+	// check main module
+	if indexer.mainModule == nil && pkg.Module.Main {
+		indexer.mainModule = module
+	}
+	return module, true
 }
 
 // createPackageInfo creates package info
 func (indexer *Indexer) createPackageInfo(pkg *packages.Package) *PackageInfo {
 	// load ast info
-	ast := processAstInfo(pkg)
+	indexer.debug("Package %v", pkg.ID)
+	ast := indexer.processAstInfo(pkg)
 
 	p := &PackageInfo{
 		ast:        ast,
@@ -219,18 +308,18 @@ func (indexer *Indexer) createStructInfo(pkg *PackageInfo, named *types.Named, d
 		named:       named,
 		data:        data,
 		ast:         pkg.ast.types[name],
-		annotations: []*AnnotationInfo{},
+		annotations: map[string]*AnnotationInfo{},
 	}
 	pkg.structs = append(pkg.structs, s)
 	indexer.cacheS[s.Id()] = s
-
+	indexer.debug("Struct %v", name)
 	if s.ast == nil {
 		return s
 	}
 
 	anno := s.ast.Annotations(indexer.config.DefaultAnnoRegex)
 	if anno != nil {
-		s.annotations = append(s.annotations, anno...)
+		s.annotations = anno
 		for _, a := range anno {
 			tmp := indexer.cacheA[a.Name]
 			if tmp == nil {
@@ -249,10 +338,11 @@ func (indexer *Indexer) createInterfaceInfo(pkg *PackageInfo, named *types.Named
 	name := named.Obj().Name()
 
 	s := &InterfaceInfo{
-		pkg:   pkg,
-		named: named,
-		data:  data,
-		ast:   pkg.ast.types[name],
+		pkg:         pkg,
+		named:       named,
+		data:        data,
+		ast:         pkg.ast.types[name],
+		annotations: map[string]*AnnotationInfo{},
 	}
 	pkg.interfaces = append(pkg.interfaces, s)
 	indexer.cacheI[s.Id()] = s
@@ -263,7 +353,7 @@ func (indexer *Indexer) createInterfaceInfo(pkg *PackageInfo, named *types.Named
 
 	anno := s.ast.Annotations(indexer.config.DefaultAnnoRegex)
 	if anno != nil {
-		s.annotations = append(s.annotations, anno...)
+		s.annotations = anno
 		for _, a := range anno {
 			tmp := indexer.cacheAI[a.Name]
 			if tmp == nil {
@@ -279,10 +369,11 @@ func (indexer *Indexer) createInterfaceInfo(pkg *PackageInfo, named *types.Named
 // createFunctionInfo create function info
 func (indexer *Indexer) createFunctionInfo(pkg *PackageInfo, signature *types.Signature, data *types.Func) *FunctionInfo {
 	f := &FunctionInfo{
-		pkg:       pkg,
-		signature: signature,
-		data:      data,
-		decl:      pkg.ast.functions[data.Name()],
+		pkg:         pkg,
+		signature:   signature,
+		data:        data,
+		decl:        pkg.ast.functions[data.Name()],
+		annotations: map[string]*AnnotationInfo{},
 	}
 	pkg.functions = append(pkg.functions, f)
 	if f.decl == nil {
@@ -291,23 +382,24 @@ func (indexer *Indexer) createFunctionInfo(pkg *PackageInfo, signature *types.Si
 
 	anno := f.decl.Annotations(indexer.config.DefaultAnnoRegex)
 	if anno != nil {
-		f.annotations = append(f.annotations, anno...)
+		f.annotations = anno
 	}
 	return f
 }
 
 // loadPackages load packages
 func (indexer *Indexer) loadPackages(pattern ...string) ([]*packages.Package, error) {
-	cfg := &packages.Config{Mode: packages.NeedSyntax |
+
+	indexer.mode = packages.NeedSyntax |
 		packages.NeedName |
 		packages.NeedTypes |
-		// packages.NeedTypesSizes |
 		packages.NeedTypesInfo |
-		// packages.NeedCompiledGoFiles |
-		// packages.NeedDeps |
 		packages.NeedImports |
-		// packages.NeedExportsFile |
-		packages.NeedFiles}
+		packages.NeedFiles
+
+	indexer.mode = indexer.mode | indexer.config.Mode
+
+	cfg := &packages.Config{Mode: indexer.mode}
 	pkgs, err := packages.Load(cfg, pattern...)
 	if err != nil {
 		return nil, fmt.Errorf("loading packages for inspection: %v", err)
@@ -351,6 +443,9 @@ func (indexer *Indexer) processPackage(pkg *packages.Package) {
 		return
 	}
 
+	// create module info
+	indexer.createModuleInfo(pkg)
+
 	// create package info
 	pkgInfo := indexer.createPackageInfo(pkg)
 
@@ -369,7 +464,10 @@ func (indexer *Indexer) processPackage(pkg *packages.Package) {
 				indexer.debug("load pattern not supported named type %v - %T", undT, undT)
 			}
 		case *types.Signature:
-			indexer.createFunctionInfo(pkgInfo, objT, obj.(*types.Func))
+			switch st := obj.(type) {
+			case *types.Func:
+				indexer.createFunctionInfo(pkgInfo, objT, st)
+			}
 		default:
 			indexer.debug("load pattern not supported object type %v - %T", objT, objT)
 		}
@@ -381,6 +479,10 @@ func (indexer *Indexer) processPackage(pkg *packages.Package) {
 			indexer.processPackage(v)
 		}
 	}
+}
+
+func (indexer *Indexer) MainModule() *ModuleInfo {
+	return indexer.mainModule
 }
 
 // FindStructsByAnnotation find all structs by annotation
@@ -408,6 +510,16 @@ func (indexer *Indexer) FindInterfaceImplementations(name string) []*StructInfo 
 		}
 	}
 	return result
+}
+
+// Packages return map of all modules
+func (indexer *Indexer) Modules() map[string]*ModuleInfo {
+	return indexer.cacheM
+}
+
+// Package returns module by module path or nil
+func (indexer *Indexer) Module(path string) *ModuleInfo {
+	return indexer.cacheM[path]
 }
 
 // Packages return map of all packages
@@ -465,6 +577,7 @@ func CreateIndexer(config *IndexerConfig) *Indexer {
 		cacheS:   map[string]*StructInfo{},
 		cacheA:   map[string][]*StructInfo{},
 		cacheAI:  map[string][]*InterfaceInfo{},
+		cacheM:   map[string]*ModuleInfo{},
 	}
 
 }
@@ -475,7 +588,7 @@ func id(pkg *PackageInfo, named *types.Named) string {
 }
 
 // createAnnotations this method creates list of annotations info from the comments
-func createAnnotations(comment *ast.CommentGroup, r *regexp.Regexp) []*AnnotationInfo {
+func createAnnotations(comment *ast.CommentGroup, r *regexp.Regexp) map[string]*AnnotationInfo {
 	// ignore annotation for empty comment
 	if comment == nil {
 		return nil
@@ -484,7 +597,7 @@ func createAnnotations(comment *ast.CommentGroup, r *regexp.Regexp) []*Annotatio
 		return nil
 	}
 
-	result := []*AnnotationInfo{}
+	result := map[string]*AnnotationInfo{}
 
 	for _, c := range comment.List {
 		sm := r.FindString(c.Text)
@@ -511,7 +624,7 @@ func createAnnotations(comment *ast.CommentGroup, r *regexp.Regexp) []*Annotatio
 			}
 		}
 
-		result = append(result, anno)
+		result[anno.Name] = anno
 	}
 	return result
 }
@@ -523,7 +636,7 @@ type AstTypeDecl struct {
 }
 
 // Annotations returns list of annotations
-func (a *AstTypeDecl) Annotations(r *regexp.Regexp) []*AnnotationInfo {
+func (a *AstTypeDecl) Annotations(r *regexp.Regexp) map[string]*AnnotationInfo {
 	return createAnnotations(a.decl.Doc, r)
 }
 
@@ -548,7 +661,7 @@ type AstFuncDecl struct {
 }
 
 // Annotations returns list of annotations
-func (a *AstFuncDecl) Annotations(r *regexp.Regexp) []*AnnotationInfo {
+func (a *AstFuncDecl) Annotations(r *regexp.Regexp) map[string]*AnnotationInfo {
 	return createAnnotations(a.decl.Doc, r)
 }
 
@@ -564,11 +677,12 @@ type AstInfo struct {
 }
 
 // processAstInfo find all types and functions in the AST
-func processAstInfo(pkg *packages.Package) *AstInfo {
+func (indexer *Indexer) processAstInfo(pkg *packages.Package) *AstInfo {
 	result := &AstInfo{
 		functions: map[string]*AstFuncDecl{},
 		types:     map[string]*AstTypeDecl{},
 	}
+	indexer.debug("Ast %v", pkg.Syntax)
 	for _, syntax := range pkg.Syntax {
 		for _, decl := range syntax.Decls {
 			switch dt := decl.(type) {
@@ -622,6 +736,15 @@ func (f *FieldStructInfo) Field(index int) *FieldInfo {
 		Struct:   f,
 		Metadata: map[string]string{},
 	}
+}
+
+func (f *FieldStructInfo) Fields() map[string]*FieldInfo {
+	fields := map[string]*FieldInfo{}
+	for i := 0; i < f.NumFields(); i++ {
+		field := f.Field(i)
+		fields[field.Name()] = field
+	}
+	return fields
 }
 
 type FieldInfo struct {
