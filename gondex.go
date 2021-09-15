@@ -261,7 +261,7 @@ type Indexer struct {
 // create module info from the package
 func (indexer *Indexer) createModuleInfo(pkg *packages.Package) (*ModuleInfo, bool) {
 
-	if indexer.mode&packages.NeedTypes == 0 {
+	if indexer.mode&packages.NeedModule == 0 {
 		return nil, false
 	}
 
